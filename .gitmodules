@@ -1,6 +1,3 @@
-[submodule "motif_based/other_metrics/fsscore"]
-	path = motif_based/other_metrics/fsscore
-	url = https://github.com/schwallergroup/fsscore.git
 [submodule "other_metrics/fsscore"]
 	path = other_metrics/fsscore
 	url = https://github.com/schwallergroup/fsscore.git
