@@ -1,0 +1,1 @@
+taken from https://github.com/iktos/generation-under-synthetic-constraint/tree/master/synthetic_scorers

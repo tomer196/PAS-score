@@ -1,0 +1,6 @@
+data/
+.vscode/
+.venv/
+__pycache__/
+output_plots/
+sampled_molecules*

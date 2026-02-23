@@ -1,0 +1,8 @@
+rdkit
+numpy
+matplotlib
+networkx
+tqdm
+pandas
+scipy
+pickle
