@@ -1,3 +1,0 @@
-[submodule "other_metrics/fsscore"]
-	path = other_metrics/fsscore
-	url = https://github.com/schwallergroup/fsscore.git
