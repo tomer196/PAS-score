@@ -100,9 +100,8 @@ To clone this repository and set up the environment:
 
 1. **Clone the repository including submodules:**
    ```bash
-   git clone --recurse-submodules git@github.com:tomer196/PAS-score.git
+   git clone git@github.com:tomer196/PAS-score.git
    ```
-   This will clone the main repository and all submodules (including `other_metrics/fsscore`).
 
 2. **Create a Python virtual environment:**
    ```bash
@@ -115,22 +114,12 @@ To clone this repository and set up the environment:
    pip install -r requirements.txt
    ```
 
-## Cloning with Git LFS
-
-Some files in this repository are tracked with Git Large File Storage (LFS).
-To ensure you get all large files:
-
-1. **Install Git LFS** (if not already installed):
-   https://git-lfs.github.com
-
-2. **Clone the repository (recommended):**
+## Getting the Motif Score Data
+The motif score data is provided as a zip file (e.g., `CATACONDENSED-MOTIFS-INCHI-PAS-SCORES.zip`).
+To use it:
+**Unzip the file:**
    ```bash
-   git clone --recurse-submodules <repo-url>
+   mkdir -p data
+   unzip CATACONDENSED-MOTIFS-INCHI-PAS-SCORES.zip -d data/
    ```
 
-3. **Fetch LFS files after cloning (if needed):**
-   ```bash
-   git lfs pull
-   ```
-
-> All collaborators must have Git LFS installed to access large files.
