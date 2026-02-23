@@ -3,13 +3,13 @@ import os, sys
 import pandas as pd
 import rdkit.Chem as Chem
 
-sys.path.insert(0, '/Users/tomer/private/chem')
+sys.path.insert(0, '/Users/tomer/private/chem/motif_based')
 from other_metrics.RAscore.RAscore_NN import RAScorerNN
 from other_metrics.RSPred.predictorRS import RSPredictor
 from other_metrics.scscore.standalone_model_numpy import SCScorer
 from pas_score import PASScore
 
-sys.path.insert(0, '/Users/tomer/private/chem/other_metrics/fsscore/src')
+sys.path.insert(0, '/Users/tomer/private/chem/motif_based/other_metrics/fsscore/src')
 from fsscore.score import Scorer
 from fsscore.models.ranknet import LitRankNet
 
@@ -51,7 +51,7 @@ def get_rscore(smiles):
 
 def get_scscore(smiles):
     model = SCScorer()
-    model.restore('/Users/tomer/private/chem/other_metrics/scscore/models/full_reaxys_model_1024bool/model.ckpt-10654.as_numpy.json.gz')
+    model.restore('/Users/tomer/private/chem/motif_based/other_metrics/scscore/models/full_reaxys_model_1024bool/model.ckpt-10654.as_numpy.json.gz')
     scores = []
     for smi in smiles:
         score = model.get_score_from_smi(smi)
@@ -60,7 +60,7 @@ def get_scscore(smiles):
     return scores
 
 def get_fscore(smiles):
-    model = LitRankNet.load_from_checkpoint('/Users/tomer/private/chem/other_metrics/fsscore/models/pretrain_graph_GGLGGL_ep242_best_valloss.ckpt', weights_only=False)
+    model = LitRankNet.load_from_checkpoint('/Users/tomer/private/chem/motif_based/other_metrics/fsscore/models/pretrain_graph_GGLGGL_ep242_best_valloss.ckpt', weights_only=False)
     scorer = Scorer(model=model)
     scores = scorer.score(smiles)
     print(f"FS scores calculated for {len(scores)} molecules")
@@ -88,7 +88,7 @@ def add_scores2csv(csv_path, output_csv_path=None):
         output_csv_path = csv_path
     df.to_csv(output_csv_path, index=False)
 
-def plot_scores_correlation(csv_path, out_path='/Users/tomer/private/chem/output_plots'):
+def plot_scores_correlation(csv_path, out_path='/Users/tomer/private/chem/motif_based/output_plots'):
     # For each metric plot correlation with the ExpertScore - plot scatter and best fit line, and print correlation coefficient (r^2)
     df = pd.read_csv(csv_path)
     import matplotlib.pyplot as plt
@@ -107,6 +107,6 @@ def plot_scores_correlation(csv_path, out_path='/Users/tomer/private/chem/output
         plt.savefig(os.path.join(out_path, f"{metric}_vs_ExpertScore.png"))
 
 if __name__ == '__main__':
-    # add_scores2csv('/Users/tomer/private/chem/sampled_molecules/molecule_scores.csv')
-    # add_scores2csv('/Users/tomer/private/chem/sampled_molecules2/expert_test.csv')
-    plot_scores_correlation('/Users/tomer/private/chem/sampled_molecules2/expert_test.csv')
+    # add_scores2csv('/Users/tomer/private/chem/motif_based/sampled_molecules/molecule_scores.csv')
+    add_scores2csv('/Users/tomer/private/chem/motif_based/sampled_molecules2/expert_test.csv')
+    # plot_scores_correlation('/Users/tomer/private/chem/motif_based/sampled_molecules2/expert_test.csv')

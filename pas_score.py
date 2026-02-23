@@ -17,7 +17,7 @@ class PASScore:
     average_per_n_rings = True
 
     def __init__(self, plot=False):
-        target_file = "CATACONDENSED-MOTIFS-INCHI-PAS-SCORES.pkl"
+        target_file = "/Users/tomer/private/chem/motif_based/data/CATACONDENSED-MOTIFS-INCHI-PAS-SCORES.pkl"
         with open(target_file, "rb") as f:
             self.pas_score = pickle.load(f)
         self.default_missing_score = min(self.pas_score.values()) - 0.5 
