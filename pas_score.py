@@ -5,6 +5,7 @@ from typing import Union
 from rdkit import Chem
 
 from extract_motifs import get_all_motifs, extract_backbone_inchis, plot_mol
+import os
 
 def n_rings(inchi: str) -> int:
     mol = Chem.MolFromInchi(inchi)
@@ -17,7 +18,7 @@ class PASScore:
     average_per_n_rings = True
 
     def __init__(self, plot=False):
-        target_file = "/Users/tomer/private/chem/motif_based/data/CATACONDENSED-MOTIFS-INCHI-PAS-SCORES.pkl"
+        target_file = os.path.join(os.path.dirname(__file__), "data", "CATACONDENSED-MOTIFS-INCHI-PAS-SCORES.pkl") 
         with open(target_file, "rb") as f:
             self.pas_score = pickle.load(f)
         self.default_missing_score = min(self.pas_score.values()) - 0.5 
