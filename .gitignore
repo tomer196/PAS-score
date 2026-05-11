@@ -1,4 +1,5 @@
-data/
+data/*
+!data/CATACONDENSED-MOTIFS-INCHI-PAS-SCORES.pkl
 .vscode/
 .venv/
 __pycache__/
