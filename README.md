@@ -25,12 +25,12 @@ PASscore is a synthetic accessibility metric for polycyclic aromatic systems (PA
    ```
 
 4. **Get the motif score data:**
-   - Download the provided zip file (e.g., `CATACONDENSED-MOTIFS-INCHI-PAS-SCORES.zip`).
-   - Unzip it into the `data/` directory:
-     ```bash
-     mkdir -p data
-     unzip CATACONDENSED-MOTIFS-INCHI-PAS-SCORES.zip -d data/
-     ```
+   The data file is stored in Git LFS and is downloaded automatically when you clone the repo.
+   If you cloned before LFS was set up, pull it explicitly:
+   ```bash
+   git lfs pull
+   ```
+   This will download `data/CATACONDENSED-MOTIFS-INCHI-PAS-SCORES.pkl` (~119 MB).
 
 ---
 
