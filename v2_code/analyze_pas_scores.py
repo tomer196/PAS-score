@@ -1,87 +1,25 @@
 import pickle
 import shutil, sys
 from typing import Union
-from multiprocessing import Pool, cpu_count
 from rdkit import Chem
 from rdkit.Chem import Draw, RDConfig
 from rdkit.Chem.Draw import rdMolDraw2D
 import matplotlib.pyplot as plt
 import numpy as np
-import pandas as pd
 from tqdm import tqdm
 import os
 from scipy.stats import pearsonr, spearmanr
 
-from extract_motifs import get_all_motifs
-from pas_score import PASScore
+from motif_based.v2_code.extract_motifs import get_all_motifs
+from motif_based.v2_code.pas_score import PASScore
 sys.path.append(os.path.join(RDConfig.RDContribDir, 'SA_Score'))
 import sascorer
 
-data_folder = os.path.join(os.path.dirname(__file__), "data")
 
-def _score_one(inchi: str):
-    """Worker function — must be top-level for multiprocessing pickling."""
-    try:
-        score = _worker_pas(inchi)
-        if score is None:
-            return inchi, np.nan, True   # (inchi, score, failed)
-        return inchi, score, False
-    except Exception as e:
-        return inchi, np.nan, True
-
-# Module-level PASScore instance initialised per worker (lazy)
-_worker_pas = None
-
-def _init_worker():
-    global _worker_pas
-    _worker_pas = PASScore()
-
-def calculate_all_backbone_pas_scores(output_file, n_workers=None):
+def calculate_all_backbone_pas_scores(output_file):
     """Calculate PAS scores for all molecules in CATACONDENSED-BACKBONE-INCHI-COUNTS.txt"""
-    if n_workers is None:
-        n_workers = max(1, cpu_count() - 1)
-
-    file = os.path.join(data_folder, "CATACONDENSED-BACKBONE-INCHI-COUNTS.txt")
-    failed_inchis_file = os.path.join(data_folder, "BACKBONE-PAS-SCORE-FAILED-INCHIS.txt")
-
-    print("Loading molecules...")
-    with open(file, "r") as f:
-        lines = f.readlines()
-
-    all_inchis = []
-    for line in lines:
-        parts = line.strip().split()
-        if len(parts) == 2:
-            all_inchis.append(parts[1])
-
-    print(f"Scoring {len(all_inchis)} molecules with {n_workers} workers...")
-    results = []
-    with Pool(processes=n_workers, initializer=_init_worker) as pool:
-        for result in tqdm(
-            pool.imap(_score_one, all_inchis, chunksize=64),
-            total=len(all_inchis),
-            desc="Calculating PAS scores",
-        ):
-            results.append(result)
-
-    inchis_out, scores_out, failed = zip(*results)
-    inchis_array = np.array(inchis_out)
-    scores_array = np.array(scores_out)
-    failed_inchis = [inchi for inchi, f in zip(inchis_out, failed) if f]
-
-    np.savez(output_file, inchis=inchis_array, scores=scores_array)
-    print(f"\nSaved PASscore results to {output_file}")
-    if failed_inchis:
-        with open(failed_inchis_file, "w") as f:
-            for inchi in failed_inchis:
-                f.write(inchi + "\n")
-        print(f"Saved {len(failed_inchis)} failed InChIs to {failed_inchis_file}")
-
-    return inchis_array, scores_array
-
-def calculate_all_backbone_sa_scores(output_file):
-    """Calculate PAS scores for all molecules in CATACONDENSED-BACKBONE-INCHI-COUNTS.txt"""
-    file = os.path.join(data_folder, "CATACONDENSED-BACKBONE-INCHI-COUNTS.txt")
+    pas = PASScore()
+    file = pas.data_folder + "CATACONDENSED-BACKBONE-INCHI-COUNTS.txt"
     
     inchis = []
     scores = []
@@ -93,7 +31,43 @@ def calculate_all_backbone_sa_scores(output_file):
     
     # Second pass: calculate scores with progress bar
     with open(file, "r") as f:
-        for line in tqdm(f, total=total_lines, desc="Calculating SA scores"):
+        for line in tqdm(f, total=total_lines, desc="Calculating PAS scores"):
+            count, inchi = line.strip().split()
+            inchis.append(inchi)
+            
+            try:
+                score = pas(inchi)
+                if score is None:
+                    score = np.nan
+            except Exception as e:
+                score = np.nan
+            
+            scores.append(score)
+    
+    inchis_array = np.array(inchis)
+    scores_array = np.array(scores)
+    
+    # Save to file
+    np.savez(output_file, inchis=inchis_array, scores=scores_array)
+    print(f"\nSaved PASscore results to {output_file}")
+    
+    return inchis_array, scores_array
+
+def calculate_all_backbone_sa_scores(output_file):
+    """Calculate PAS scores for all molecules in CATACONDENSED-BACKBONE-INCHI-COUNTS.txt"""
+    file = pas.data_folder + "CATACONDENSED-BACKBONE-INCHI-COUNTS.txt"
+    
+    inchis = []
+    scores = []
+    
+    # First pass: count total lines
+    print("Loading molecules...")
+    with open(file, "r") as f:
+        total_lines = sum(1 for _ in f)
+    
+    # Second pass: calculate scores with progress bar
+    with open(file, "r") as f:
+        for line in tqdm(f, total=total_lines, desc="Calculating PAS scores"):
             count, inchi = line.strip().split()
             inchis.append(inchi)
             
@@ -216,7 +190,6 @@ def sample_molecules_by_score(inchis=None, scores=None, data_file=None, n_sample
     shutil.rmtree(out_folder, ignore_errors=True)
     os.makedirs(out_folder, exist_ok=True)
     
-    csv_data = []
     for i, (inchi, score) in enumerate(zip(sampled_inchis, sampled_scores)):
         print(f"{i+1:2d}. Score: {score:7.4f} | InChI: {inchi}")
         
@@ -224,14 +197,20 @@ def sample_molecules_by_score(inchis=None, scores=None, data_file=None, n_sample
         try:
             mol = Chem.MolFromInchi(inchi, treatWarningAsError=False)
             if mol is not None:
-                # replace any SUBSTITUENT_PLACEHOLDER with H
-                rw = Chem.RWMol(mol)
-                for atom in rw.GetAtoms():
-                    if atom.GetSymbol() == 'F':
-                        atom.SetAtomicNum(1)  # change to H
-                mol = rw.GetMol()
+                # Preprocess: remove explicit Hs (helps sanitization/aromaticity perception)
                 mol = Chem.RemoveHs(mol)
-                img = Draw.MolToImage(mol, size=(600, 600))
+
+                # Sanitize + force aromaticity perception
+                Chem.SanitizeMol(mol)
+                Chem.SetAromaticity(mol)
+
+                # Now kekulize and CLEAR aromatic flags so bonds become SINGLE/DOUBLE
+                Chem.Kekulize(mol, clearAromaticFlags=True)
+
+                # Ensure drawing uses the kekulized form
+                mol = rdMolDraw2D.PrepareMolForDrawing(mol, kekulize=True, addChiralHs=False)
+                # Draw molecule with explicit double bonds
+                img = Draw.MolToImage(mol, size=(600, 600), kekulize=True)
                 sa_score = sascorer.calculateScore(mol)
                 
                 # Create figure with title
@@ -245,22 +224,10 @@ def sample_molecules_by_score(inchis=None, scores=None, data_file=None, n_sample
                 filename = f'{out_folder}/molecule_{i+1:02d}_PASscore_{score:.4f}_SAscore_{sa_score:.4f}.png'
                 plt.savefig(filename, dpi=150, bbox_inches='tight')
                 plt.close()
-
-                csv_data.append({
-                    'molecule_number': i,
-                    'inchi': inchi,
-                    'pas_score': score,
-                    'sa_score': sa_score
-                })
             else:
                 print(f"    Warning: Could not convert InChI to molecule")
         except Exception as e:
             print(f"    Error drawing molecule: {e}")
-
-    df = pd.DataFrame(csv_data)
-    csv_file = f'{out_folder}/molecule_scores.csv'
-    df.to_csv(csv_file, index=False)
-    print(f"Saved CSV with molecule scores to {csv_file}")
     
     print(f"{'='*80}")
     print(f"Saved {n_samples} molecule images to {out_folder} directory")
@@ -280,10 +247,6 @@ def analyze_score_correlation(pas_file, sa_file, out_folder='output_plots'):
     common_inchis = sorted(set(pas_dict) & set(sa_dict))
     pas_scores = np.array([pas_dict[i] for i in common_inchis])
     sa_scores = np.array([sa_dict[i] for i in common_inchis])
-    finite_both = np.isfinite(pas_scores) & np.isfinite(sa_scores)
-    pas_scores = pas_scores[finite_both]
-    sa_scores = sa_scores[finite_both]
-    common_inchis = [inchi for i, inchi in enumerate(common_inchis) if finite_both[i]]
 
     print(f"Common molecules: {len(common_inchis)}")
 
@@ -313,12 +276,19 @@ def analyze_score_correlation(pas_file, sa_file, out_folder='output_plots'):
     plt.title("Rank correlation")
     plt.savefig(f"{out_folder}/rank_correlation_scatter.jpg")
 
+    return {
+        "n_common": len(common_inchis),
+        "pearson_r": pearson.statistic,
+        "spearman_r": spearman.statistic,
+        "pas_scores": pas_scores,
+        "sa_scores": sa_scores,
+        "diff": diff,
+    }
 
 if __name__ == '__main__':
     pas = PASScore()
-    data_folder = os.path.join(os.path.dirname(__file__), "data")
     
-    pas_file = f"{data_folder}/BACKBONE-PAS-SCORES.npz"
+    pas_file = f"{pas.data_folder}/BACKBONE-PAS-SCORES.npz"
     if os.path.exists(pas_file):
         print(f"Loading existing PAS scores from {pas_file}")
         print("To recalculate, delete the file and run again.\n")
@@ -326,21 +296,21 @@ if __name__ == '__main__':
         print("Calculating PAS scores for all molecules...")
         inchis, scores = calculate_all_backbone_pas_scores(pas_file)
 
-    # sa_file = f"{data_folder}/BACKBONE-SA-SCORES.npz"
-    # if os.path.exists(sa_file):
-    #     print(f"Loading existing SA scores from {sa_file}")
-    #     print("To recalculate, delete the file and run again.\n")
-    # else:
-    #     print("Calculating SA scores for all molecules...")
-    #     # Calculate SA scores for all molecules
-    #     inchis, scores = calculate_all_backbone_sa_scores(sa_file)
+    sa_file = f"{pas.data_folder}/BACKBONE-SA-SCORES.npz"
+    if os.path.exists(sa_file):
+        print(f"Loading existing SA scores from {sa_file}")
+        print("To recalculate, delete the file and run again.\n")
+    else:
+        print("Calculating SA scores for all molecules...")
+        # Calculate SA scores for all molecules
+        inchis, scores = calculate_all_backbone_sa_scores(sa_file)
     
-    # # Plot the distribution
-    plot_pas_score_distribution(data_file=pas_file, out_folder='motif_based/output_plots')
+    # Plot the distribution
+    # plot_pas_score_distribution(data_file=data_file)
     
-    # # Sample 20 molecules with equal spacing
-    # sample_molecules_by_score(data_file=pas_file, n_samples=20, out_folder='motif_based/sampled_molecules')
-    # sample_molecules_by_score(data_file=pas_file, n_samples=20, min_rings=5, max_rings=7, out_folder='motif_based/sampled_molecules2')
+    # Sample 20 molecules with equal spacing
+    sample_molecules_by_score(data_file=pas_file, n_samples=20, out_folder='sampled_molecules')
+    sample_molecules_by_score(data_file=pas_file, n_samples=20, min_rings=5, max_rings=7, out_folder='sampled_molecules2')
 
     # Analyze correlation between PAS and SA scores
     # analyze_score_correlation(pas_file, sa_file)

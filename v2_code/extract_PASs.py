@@ -8,14 +8,14 @@ from collections import Counter
 import numpy as np
 import pickle
 
-from extract_motifs import get_all_motifs, extract_backbone_inchis, is_conjugated_polycyclic_ring
+from motif_based.v2_code.extract_motifs import extract_induced_submol, get_all_motifs
 
 # Suppress RDKit warnings
 RDLogger.DisableLog('rdApp.*')
 BACKBONE_ATOM_TYPES = {'C', 'H', 'O', 'S', 'N', 'P', 'Si', 'B'}
 SUBSTITUENT_ATOM_TYPES = {'C', 'H', 'O', 'S', 'N', 'P', 'Si', 'B', 'F', 'Cl', 'Br', 'I'}
 MAX_RINGS_ATOMS = 8
-data_folder = os.path.join(os.path.dirname(__file__), "data") + '/'
+data_folder = "data_v2/"
 os.makedirs(data_folder, exist_ok=True)
 
 def is_pas_molecule(smiles: str, min_backbone_rings=2) -> bool:
@@ -35,18 +35,11 @@ def is_pas_molecule(smiles: str, min_backbone_rings=2) -> bool:
     if not any(atom.GetSymbol() == 'C' for atom in mol.GetAtoms()):
         return False
 
-    # 2. Early atom-type filter: every atom must be a valid substituent type.
-    #    This covers both the backbone and substituent atom-type constraints
-    #    (checks 3 & 4) without needing ring perception, rejecting exotic atoms cheaply.
-    for atom in mol.GetAtoms():
-        if atom.GetSymbol() not in SUBSTITUENT_ATOM_TYPES:
-            return False
-
     ring_info = mol.GetRingInfo()
     aromatic_rings = [
         set(ring) for ring in ring_info.AtomRings()
-        if len(ring) <= MAX_RINGS_ATOMS
-        and is_conjugated_polycyclic_ring(mol, ring)
+        if all(mol.GetAtomWithIdx(i).GetIsAromatic() for i in ring)
+        and len(ring) <= MAX_RINGS_ATOMS
     ]
 
     # 2. Backbone: at least 2 fused aromatic rings
@@ -123,19 +116,65 @@ def filter_pas_from_pubchem():
 
     print(f"Found {pas_count} PAS compounds")
 
+def extract_backbone_smiles(smiles: str, min_backbone_rings=2):
+    mol = Chem.MolFromSmiles(smiles)
+    if mol is None:
+        return []
+
+    try:
+        Chem.SanitizeMol(mol)
+    except:
+        return []
+
+    ring_info = mol.GetRingInfo()
+    aromatic_rings = [
+        set(r) for r in ring_info.AtomRings()
+        if all(mol.GetAtomWithIdx(i).GetIsAromatic() for i in r)
+        and len(r) <= MAX_RINGS_ATOMS
+    ]
+    if not aromatic_rings:
+        return []
+
+    # find all fused aromatic clusters
+    fused_clusters = []
+    visited = set()
+
+    for i, r1 in enumerate(aromatic_rings):
+        if i in visited:
+            continue
+        cluster = set(r1)
+        stack = [i]
+        visited.add(i)
+
+        while stack:
+            k = stack.pop()
+            for j, r2 in enumerate(aromatic_rings):
+                if j not in visited and len(aromatic_rings[k] & r2) >= 2:
+                    visited.add(j)
+                    cluster |= r2
+                    stack.append(j)
+
+        fused_clusters.append(cluster)
+
+    backbones = []
+    for cluster_atoms in fused_clusters:
+        ring_count = sum(1 for r in aromatic_rings if r.issubset(cluster_atoms))
+        if ring_count >= min_backbone_rings:
+            submol = extract_induced_submol(mol, cluster_atoms)
+
+            inchi = Chem.MolToInchi(submol)
+            backbones.append(inchi)
+
+    return backbones
+
 def process_line_backbone(line, min_backbone_rings=2):
     cid, smiles = line.strip().split("\t")
-    try:
-        backbones = extract_backbone_inchis(smiles, min_backbone_rings)
-    except:
-        print(f"ERROR processing CID {cid} with SMILES {smiles}")
-        # raise KeyError
-        return None
+    backbones = extract_backbone_smiles(smiles, min_backbone_rings)
     if not backbones:
         return None
     return cid + "\t" + "\t".join(backbones) + "\n"
 
-def extract_backbones(parallel=True):
+def extract_backbones():
     source_file = data_folder + "PAS-CID-SMILES.txt"
     target_file = data_folder + "BACKBONE-INCHI.txt"
     # Get total lines for progress bar (fast single pass)
@@ -143,31 +182,25 @@ def extract_backbones(parallel=True):
         total_lines = sum(1 for _ in f)
     print(f"Total lines to process: {total_lines}")
 
-    if not parallel:
-        # Non-parallel processing
-        with open(source_file) as f, \
-             open(target_file, "w") as out_f:
-            
-            for line in tqdm(f, total=total_lines, desc="Extracting backbones"):
-                result = process_line_backbone(line, min_backbone_rings=2)
-                if result:
-                    out_f.write(result)
-    else:
-        # Parallel processing
-        with open(source_file) as f, \
-             open(target_file, "w") as out_f, \
-             Pool(cpu_count()) as pool:
+    # limit = 10
+    # n = 0
+    with open(source_file) as f, \
+         open(target_file, "w") as out_f, \
+         Pool(cpu_count()) as pool:
 
-            process_func = partial(process_line_backbone, min_backbone_rings=2)
-            results = pool.imap_unordered(
-                process_func,
-                f,
-                chunksize=1000
-            )
+        process_func = partial(process_line_backbone, min_backbone_rings=2)
+        results = pool.imap_unordered(
+            process_func,
+            f,
+            chunksize=1000
+        )
 
-            for r in tqdm(results, total=total_lines, desc="Extracting backbones"):
-                if r:
-                    out_f.write(r)
+        for r in tqdm(results, total=total_lines, desc="Extracting backbones"):
+            if r:
+                out_f.write(r)
+            # n += 1
+            # if n >= limit:
+            #     break
 
 
 def process_line_count_backbone(line):
@@ -348,9 +381,9 @@ def sum_motifs_from_backbones():
     
     print(f"Saved motif counts to {target_file}")
 
-def calc_pas_score_per_motif():
+def calc_sa_score_per_motif():
     file = data_folder + "CATACONDENSED-MOTIFS-INCHI-COUNTS.txt"
-    target_file = data_folder + "CATACONDENSED-MOTIFS-INCHI-PAS-SCORES.pkl"
+    target_file = data_folder + "CATACONDENSED-MOTIFS-INCHI-SA-SCORES.pkl"
     counts = []
     inchis = []
     with open(file, "r") as f:
@@ -363,17 +396,17 @@ def calc_pas_score_per_motif():
     inchis = np.array(inchis)
     sorted_inchis = inchis[np.argsort(-counts)]
     sorted_counts = np.sort(counts)[::-1]
-    # score_ratio = 0.8
-    # sum_motifs = np.sum(sorted_counts)
-    # cumsum = np.cumsum(sorted_counts)
-    # threshold = sum_motifs * score_ratio
-    # num_fragments_80_percent = np.searchsorted(cumsum, threshold) + 1
+    score_ratio = 0.8
+    sum_motifs = np.sum(sorted_counts)
+    cumsum = np.cumsum(sorted_counts)
+    threshold = sum_motifs * score_ratio
+    num_fragments_80_percent = np.searchsorted(cumsum, threshold) + 1
     
     print(f"Total motifs: {len(sorted_counts)}")
-    # print(f"Number of fragment types forming 80% of all fragments: {num_fragments_80_percent}")
+    print(f"Number of fragment types forming 80% of all fragments: {num_fragments_80_percent}")
     
-    # sa_score_per_motif = np.log10(counts / num_fragments_80_percent)
-    sa_score_per_motif = np.log10(sorted_counts)
+    # Calculate SA score: log10(actual_count / num_fragments_80_percent)
+    sa_score_per_motif = np.log10(counts / num_fragments_80_percent)
     sa_score = {inchi: score for inchi, score in zip(inchis, sa_score_per_motif)}
     with open(target_file, "wb") as f:
         pickle.dump(sa_score, f)
@@ -397,4 +430,4 @@ if __name__ == '__main__':
     # count_backbones()                     # count unique backbones save in BACKBONE-INCHI-COUNTS.txt
     # filter_catacondensed_backbones()      # filter catacondensed backbones save in CATACONDENSED-BACKBONE-INCHI-COUNTS.txt
     # sum_motifs_from_backbones()           # sum motifs from backbones save in CATACONDENSED-MOTIFS-INCHI-COUNTS.txt
-    calc_pas_score_per_motif()               # calculate PAS score per motif and save in CATACONDENSED-MOTIFS-INCHI-PAS-SCORES.pkl
+    calc_sa_score_per_motif()               # calculate SA score per motif and save in CATACONDENSED-MOTIFS-INCHI-SA-SCORES.pkl

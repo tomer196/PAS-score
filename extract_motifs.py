@@ -21,6 +21,73 @@ FUSED_RING_PLACEHOLDER = 'Cl'
 MAX_RINGS_ATOMS = 8
 
 
+# ---------------------------------------------------------------------------
+# Conjugated / aromatic ring detection (Hückel-aware)
+# ---------------------------------------------------------------------------
+
+def _get_ring_bonds(mol, ring_atoms):
+    n = len(ring_atoms)
+    bonds = []
+    for i in range(n):
+        b = mol.GetBondBetweenAtoms(ring_atoms[i], ring_atoms[(i + 1) % n])
+        if b is None:
+            return []
+        bonds.append(b)
+    return bonds
+
+
+def _is_pi_or_conjugated_bond(bond):
+    bt = bond.GetBondType()
+    if bond.GetIsAromatic() or bond.GetIsConjugated() or bt == Chem.BondType.DOUBLE:
+        return True
+    if bt == Chem.BondType.SINGLE:
+        sp2 = Chem.rdchem.HybridizationType.SP2
+        sp  = Chem.rdchem.HybridizationType.SP
+        if bond.GetBeginAtom().GetHybridization() in (sp2, sp) and \
+           bond.GetEndAtom().GetHybridization() in (sp2, sp):
+            return True
+    return False
+
+
+def _estimate_ring_pi_electrons(mol, ring_atoms):
+    pi_e = 0
+    for idx in ring_atoms:
+        atom = mol.GetAtomWithIdx(idx)
+        an = atom.GetAtomicNum()
+        if an == 5:          # B: empty p orbital
+            pi_e += 0
+        elif an == 7:        # N
+            pi_e += 2 if atom.GetTotalNumHs() > 0 else 1
+        elif an in (8, 16):  # O, S
+            pi_e += 2
+        else:                # C and others
+            pi_e += 1
+    return pi_e
+
+
+def is_conjugated_polycyclic_ring(mol, ring_atoms):
+    """
+    Return True if ring_atoms forms a fully conjugated (aromatic or
+    antiaromatic) ring, using Hückel π-electron counting with fallback to
+    RDKit's own aromaticity flag.
+    """
+    ring_bonds = _get_ring_bonds(mol, ring_atoms)
+    if not ring_bonds:
+        return False
+
+    # Trust RDKit when it marks all bonds as aromatic
+    if all(b.GetIsAromatic() for b in ring_bonds):
+        return True
+
+    if not all(_is_pi_or_conjugated_bond(b) for b in ring_bonds):
+        return False
+
+    pi_e = _estimate_ring_pi_electrons(mol, ring_atoms)
+    return pi_e > 0 and pi_e % 4 in (0, 2)
+
+
+# ---------------------------------------------------------------------------
+
 def extract_induced_submol(mol, atom_indices, ring_mode=False):
     atom_indices_set = set(atom_indices)
     em = Chem.EditableMol(Chem.Mol())
@@ -104,8 +171,8 @@ def extract_backbone_inchis(mol: Union[Chem.Mol, str], min_backbone_rings=2):
     ring_info = mol.GetRingInfo()
     aromatic_rings = [
         set(r) for r in ring_info.AtomRings()
-        if all(mol.GetAtomWithIdx(i).GetIsAromatic() for i in r)
-        and len(r) <= MAX_RINGS_ATOMS
+        if len(r) <= MAX_RINGS_ATOMS
+        and is_conjugated_polycyclic_ring(mol, r)
     ]
     if not aromatic_rings:
         return []
@@ -170,9 +237,12 @@ def get_all_motifs(mol: Union[Chem.Mol, str], plot: bool = False, plot_prefix: s
         print(f"Failed to sanitize molecule from InChI: {mol}")
         return []
     
-    # 2. Find all aromatic rings and build graph
+    # 2. Find all conjugated polycyclic rings and build graph
     ring_info = mol.GetRingInfo()
-    aromatic_rings = [set(ring) for ring in ring_info.AtomRings()] # in this stage all acount as romatic
+    aromatic_rings = [
+        set(ring) for ring in ring_info.AtomRings()
+        if is_conjugated_polycyclic_ring(mol, ring)
+    ]
     
     if len(aromatic_rings) == 0:
         return []

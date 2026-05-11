@@ -4,29 +4,27 @@ from rdkit import Chem
 from rdkit.Chem import Draw
 import os
 
-data_folder = "motif_based/data/"
-out_folder = "motif_based/output_plots"
+data_folder = "data_v2/"
+out_folder = "output_plots"
 os.makedirs(out_folder, exist_ok=True)
 
-def plot_top_motifs(top_n=10, n_rings=None):
+def plot_top_motifs(top_n=10):
     file = data_folder + "CATACONDENSED-MOTIFS-INCHI-COUNTS.txt"
     inchis = []
     counts = []
-    motif_mols = []
     with open(file, "r") as f:
         for line in f:
             count, inchi = line.strip().split()
-            motif_mol = Chem.MolFromInchi(inchi)
-            if n_rings is not None:
-                ri = motif_mol.GetRingInfo().NumRings()
-                if ri < n_rings:
-                    continue
             inchis.append(inchi)
             counts.append(int(count))
-            motif_mols.append(motif_mol)
             if len(inchis) >= top_n:
                 break
 
+    motif_mols = []
+    for motif_inchi in inchis:
+        motif_mol = Chem.MolFromInchi(motif_inchi)
+        motif_mols.append(motif_mol)
+    
     # Plot all motifs in a grid
     img = Draw.MolsToGridImage(motif_mols, molsPerRow=4, subImgSize=(300, 300), legends=list(map(str, counts)))
     plt.figure(figsize=(12, 3 * ((len(motif_mols) - 1) // 4 + 1)))
@@ -34,10 +32,7 @@ def plot_top_motifs(top_n=10, n_rings=None):
     plt.title(f"Top {top_n} Most Common Motifs")
     plt.axis('off')
     plt.tight_layout()
-    if n_rings is not None:
-        plt.savefig(f'{out_folder}/top_motifs_min_rings_{n_rings}.jpg')
-    else:
-        plt.savefig(f'{out_folder}/top_motifs.jpg')
+    plt.savefig(f'{out_folder}/top_motifs.jpg')
 
 def plot_motifs_frequancy():
     file = data_folder + "CATACONDENSED-MOTIFS-INCHI-COUNTS.txt"
@@ -96,8 +91,5 @@ def analyze():
 
 if __name__ == "__main__":
     plot_top_motifs()
-    plot_top_motifs(n_rings=2)
-    plot_top_motifs(n_rings=3)
-    plot_top_motifs(n_rings=4)
     plot_motifs_frequancy()
     analyze()
